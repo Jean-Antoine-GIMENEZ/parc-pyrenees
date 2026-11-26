@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les communes du Parc national des Pyrénées</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
+    
+    #panneau {
+      position: absolute; top: 10px; right: 10px; width: min(290px, calc(100% - 80px)); max-height: calc(100% - 60px); overflow: auto;
+      background: white; padding: 6px 10px; border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      font-size: 13px; line-height: 1.5;
+    }
+
+    #panneau > summary { cursor: pointer; font-weight: bold; font-size: 14px; }
+
+    #panneau .titre { margin: 10px 0 2px; font-weight: bold; }
+
+    #panneau label { display: block; }
+
+    #panneau p { margin: 4px 0; }
+
+    #panneau .note { color: #555; font-size: 12px; }
+
+    #panneau details details { margin-top: 8px; border-top: 1px solid #ddd; padding-top: 4px; }
+
+    #panneau details details summary { cursor: pointer; font-weight: bold; }
+
+    #panneau ul { margin: 4px 0; padding-left: 18px; }
+
+    #panneau li { margin-bottom: 4px; }
+
+    .classe {
+      display: inline-block; width: 14px; height: 10px; border: 1px solid #555; vertical-align: middle; margin-right: 4px;
+    }
+
+    .trait { display: inline-block; width: 18px; vertical-align: middle; margin-right: 4px; }
+
+    #resume { background: #f4f4f4; border-radius: 3px; padding: 4px 6px; }
+
+    .fiche { font-size: 13px; line-height: 1.45; max-width: 270px; }
+    .fiche h3 { margin: 0 0 2px; font-size: 15px; }
+    .fiche table { border-collapse: collapse; margin: 4px 0; }
+    .fiche td { padding: 1px 6px 1px 0; vertical-align: top; }
+    .fiche td:last-child { text-align: right; white-space: nowrap; }
+    .fiche .source { color: #555; font-size: 11px; border-top: 1px solid #ddd; margin-top: 4px; padding-top: 3px; }
+    .maplibregl-popup-content { padding: 10px 12px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <details id="panneau" open>
+    <summary>Les communes du Parc national des Pyrénées</summary>
+    <p class="titre">Part du territoire communal en cœur de parc</p>
+
+    <div>
+      <span class="classe" style="background: #006837;"></span> 45 % et plus<br>
+      <span class="classe" style="background: #31a354;"></span> de 30 à 45 %<br>
+      <span class="classe" style="background: #78c679;"></span> de 15 à 30 %<br>
+      <span class="classe" style="background: #c2e699;"></span> moins de 15 %<br>
+      <span class="classe" style="background: #fff7bc;"></span> Aire d'adhésion<br>
+      <span class="classe" style="background: white; border: 2px dashed #333;"></span> Communes
+    </div>
+
+    <label><input type="checkbox" value="communes" checked> afficher les communes</label>
+
+    <p class="titre">Population municipale</p>
+
+    <svg id="legende-population" width="200" height="62" aria-label="Légende des cercles de population"></svg>
+
+    <label><input type="checkbox" value="population" checked> afficher les cercles</label>
+
+    <p class="titre">Limites du Parc</p>
+
+    <p class="titre">Fond</p>
+
+    <label><input type="radio" name="fond" value="plan" checked> Plan IGN</label>
+    <label><input type="radio" name="fond" value="photos"> Photographies aériennes</label>
+    <label><input type="checkbox" value="ombrage" checked> ombrage du relief</label>
+
+  <script type="module">
+    import * as maplibregl from "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs";
+
+    const IGN = "Plan IGN © IGN";
+    const SOURCES_COMMUNES = "Communes : IGN, ADMIN EXPRESS ; population : INSEE, population municipale";
+    const DREAL = "Cœur, aire d'adhésion : DREAL Nouvelle-Aquitaine";
+    const RAYON_PAR_RACINE = 0.28;
+
+    const map = new maplibregl.Map({
+      container: "map",
+      style: "https://data.geopf.fr/annexes/ressources/vectorTiles/styles/PLAN.IGN/standard.json",
+      attributionControl: { customAttribution: IGN, compact: window.innerWidth < 700 },
+    }); 
+
+
+    map.fitBounds([[-0.75, 42.67], [0.40, 43.13]], { animate: false });
+    map.addControl(new maplibregl.NavigationControl(), "top-left");
+    map.addControl(new maplibregl.ScaleControl(), "bottom-left");
+
+    window.map = map;
+
+    const PETIT_ECRAN = window.innerWidth < 700;
+    if (PETIT_ECRAN) document.getElementById("panneau").open = false;
+
+    const nombre = (x, decimales = 0) => x.toLocaleString("fr-FR", { minimumFractionDigits: decimales, maximumFractionDigits: decimales });
+    const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+    
+    function date(iso) {
+      const [a, m, j] = iso.split("-").map(Number);
+      return (j === 1 ? "1er" : j) + " " + MOIS[m - 1] + " " + a;
+    }
+
+    function echapper(texte) {
+      const div = document.createElement("div");
+      div.textContent = texte;
+      return div.innerHTML;
+    }
+
+    function legendePopulation() {
+      const svg = document.getElementById("legende-population");
+      const valeurs = [5000, 1000, 100];
+      const rMax = RAYON_PAR_RACINE * Math.sqrt(valeurs[0]);
+      const base = 10 + 2 * rMax;
+      let contenu = "";
+      let yTexte = -Infinity;
+
+      for (const v of valeurs) {
+        const r = RAYON_PAR_RACINE * Math.sqrt(v);
+        const yHaut = base - 2 * r;
+        yTexte = Math.max(yHaut + 4, yTexte + 14);
+        contenu += `<circle cx="${rMax + 2}" cy="${base - r}" r="${r}" fill="rgba(140,45,4,0.55)" stroke="white" stroke-width="1"/>`;
+        contenu += `<polyline points="${rMax + 2},${yHaut} ${2 * rMax + 14},${yHaut} ${2 * rMax + 18},${yTexte - 4}" fill="none" stroke="#888" stroke-dasharray="2 2"/>`;
+        contenu += `<text x="${2 * rMax + 22}" y="${yTexte}" font-size="12">${nombre(v)} habitants</text>`;
+      }
+
+      svg.setAttribute("height", Math.max(base, yTexte) + 4);
+      svg.innerHTML = contenu;
+
+    }
+
+    legendePopulation();
+
+    const STATUT = {
+      "cœur et aire": "en cœur de parc et en aire d'adhésion",
+      "cœur seulement": "en cœur de parc ; le reste de la commune est hors de l'aire d'adhésion",
+      "aire seulement": "en aire d'adhésion, sans cœur de parc",
+    };
+
+    function fiche(c) {
+      const horsParc = Math.max(0, 100 - c.part_coeur - c.part_aire);
+      let lignes = `<tr><td>Population¹</td><td><b>${nombre(c.population)}</b> habitants</td></tr>`
+        + `<tr><td>Surface²</td><td>${nombre(c.surface_km2, 2)} km²</td></tr>`
+        + `<tr><td>en cœur de parc³</td><td><b>${nombre(c.part_coeur, 1)} %</b> (${nombre(c.coeur_km2, 2)} km²)</td></tr>`
+        + `<tr><td>en aire d'adhésion³</td><td>${nombre(c.part_aire, 1)} % (${nombre(c.aire_km2, 2)} km²)</td></tr>`;
+
+      if (horsParc >= 0.5) lignes += `<tr><td>hors du Parc³</td><td>${nombre(horsParc, 1)} %</td></tr>`;
+
+      return `<div class="fiche">`
+        + `<h3>${echapper(c.nom)}</h3>`
+        + `<div>${echapper(c.departement)}, code INSEE ${echapper(c.code_insee)}</div>`
+        + `<div>Dans le Parc : ${STATUT[c.statut]}</div>`
+        + `<table>${lignes}</table>`
+    }
+
+    map.on("load", async () => {
+      const couchesDuStyle = map.getStyle().layers;
+      let ecritures;
+      for (let i = couchesDuStyle.length - 1; i >= 0; i--) {
+        if (couchesDuStyle[i].type !== "symbol") break;
+        ecritures = couchesDuStyle[i].id;
+      }
+
+      map.setLayoutProperty("ocs - vegetation - zone boiséee, foret fermee, peupleraie", "visibility", "none");
+
+      const [communes, points] = await Promise.all([
+        fetch("donnees/communes_parc.geojson").then((r) => r.json()),
+        fetch("donnees/communes_parc_points.geojson").then((r) => r.json()),
+      ]);
+      const parCode = {};
+      for (const f of communes.features) parCode[f.properties.code_insee] = f.properties;
+
+      const liste = Object.values(parCode);
+      const habitants = liste.reduce((s, c) => s + c.population, 0);
+      const avecCoeur = liste.filter((c) => c.coeur_km2 > 0).length;
+      const avecAire = liste.filter((c) => c.aire_km2 > 0).length;
+
+      document.getElementById("resume").innerHTML =
+        `<b>${liste.length} communes</b> ont du territoire dans le Parc : ${avecCoeur} en cœur, ${avecAire} en aire d'adhésion `
+        + `(${liste.length - avecCoeur} en aire seulement, ${liste.length - avecAire} en cœur seulement). `
+        + `Elles comptent <b>${nombre(habitants)} habitants</b> (population municipale au ${date(liste[0].date_population)}).`;
+
+      const altitudes = {
+        type: "raster-dem",
+        tiles: ["https://tiles.mapterhorn.com/{z}/{x}/{y}.webp"],
+        encoding: "terrarium",
+        tileSize: 512,
+        maxzoom: 17,
+        attribution: "Relief : <a href='https://mapterhorn.com/attribution' target='_blank'>© Mapterhorn</a>",
+      };
+
+      map.addSource("ombrage", altitudes);
+      map.addSource("terrain", altitudes);
+      map.addLayer({
+        id: "ombrage", type: "hillshade", source: "ombrage",
+        paint: { "hillshade-exaggeration": 0.4 },
+      }, ecritures);
+      map.addControl(new maplibregl.TerrainControl({ source: "terrain", exaggeration: 1.5 }), "top-left");
+      map.addControl(new maplibregl.GlobeControl(), "top-left");
+
+      map.addSource("photos", {
+        type: "raster",
+        tiles: ["https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
+          + "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg"
+          + "&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"],
+        tileSize: 256,
+        attribution: "Photographies aériennes © IGN",
+      });
+      map.addLayer({ id: "photos", type: "raster", source: "photos", layout: { visibility: "none" } }, "ombrage");
+
+      map.addSource("communes", {type: "geojson", data: communes, promoteId: "code_insee", attribution: SOURCES_COMMUNES,});
+
+      map.addLayer({
+        id: "communes", type: "fill", source: "communes",
+        paint: {
+          "fill-color": [
+            "case", ["==", ["get", "coeur_km2"], 0], "#fff7bc",
+            ["step", ["get", "part_coeur"],
+              "#c2e699",
+              15, "#78c679",
+              30, "#31a354",
+              45, "#006837"],
+          ],
+          "fill-opacity": ["case", ["boolean", ["feature-state", "survol"], false], 0.9, 0.7],
+        },
+      }, ecritures);
+      map.addLayer({
+        id: "communes-contour", type: "line", source: "communes",
+        paint: {
+          "line-color": "#333",
+          "line-width": ["case", ["boolean", ["feature-state", "survol"], false], 2.5, 0.6],
+        },
+      }, ecritures);
+      map.addLayer({
+        id: "communes-partielles", type: "line", source: "communes",
+        filter: ["<", ["+", ["get", "part_coeur"], ["get", "part_aire"]], 99],
+        paint: { "line-color": "#333", "line-width": 2, "line-dasharray": [2, 1.5] },
+      }, ecritures);
+
+      map.addSource("coeur", { type: "geojson", data: "donnees/pnp_coeur.geojson", attribution: DREAL });
+
+      map.addSource("aire", { type: "geojson", data: "donnees/pnp_aire_adhesion.geojson" });
+
+      map.addLayer({
+        id: "aire-limite", type: "line", source: "aire",
+        paint: { "line-color": "#8c6d1f", "line-width": 2, "line-dasharray": [3, 2] },
+      }, ecritures);
+
+      map.addLayer({
+        id: "coeur-limite", type: "line", source: "coeur",
+        paint: { "line-color": "#00441b", "line-width": 2.2 },
+      }, ecritures);
+
+      map.addSource("population", { type: "geojson", data: points });
+
+      map.addLayer({
+        id: "population", type: "circle", source: "population",
+        paint: {
+          "circle-radius": ["*", RAYON_PAR_RACINE, ["sqrt", ["get", "population"]]],
+          "circle-color": "#8c2d04",
+          "circle-opacity": 0.55,
+          "circle-stroke-color": "white",
+          "circle-stroke-width": 1,
+        },
+      }, ecritures);
+
+      const emprise = new maplibregl.LngLatBounds();
+
+      for (const f of communes.features) {
+        const polygones = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+        for (const poly of polygones) for (const p of poly[0]) emprise.extend(p);
+      }
+
+      const marge = PETIT_ECRAN ? { top: 60, bottom: 30, left: 50, right: 20 } : { top: 20, bottom: 20, left: 60, right: 320 };
+      map.fitBounds(emprise, { padding: marge, animate: false });
+
+      const COUCHES_FICHE = ["population", "communes"];
+
+      map.on("click", (e) => {
+        const entites = map.queryRenderedFeatures(e.point, { layers: COUCHES_FICHE });
+
+        if (entites.length === 0) return;
+        const c = parCode[entites[0].properties.code_insee];
+
+        if (PETIT_ECRAN) {
+          map.easeTo({ center: e.lngLat, offset: [0, map.getCanvas().clientHeight / 2 - 140] });
+          new maplibregl.Popup({ maxWidth: "300px", anchor: "bottom" }).setLngLat(e.lngLat).setHTML(fiche(c)).addTo(map);
+
+        } else {
+          new maplibregl.Popup({ maxWidth: "300px" }).setLngLat(e.lngLat).setHTML(fiche(c)).addTo(map);
+        }
+      });
+
+      const infoBulle = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10 });
+      let survolee = null;
+
+      function eteindre() {
+        if (survolee !== null) map.setFeatureState({ source: "communes", id: survolee }, { survol: false });
+        survolee = null;
+      }
+
+      const TACTILE = window.matchMedia("(hover: none)").matches;
+
+      map.on("mousemove", (e) => {
+        if (TACTILE) return;
+        const entites = map.queryRenderedFeatures(e.point, { layers: COUCHES_FICHE });
+        eteindre();
+
+        if (entites.length === 0) {
+          infoBulle.remove();
+          map.getCanvas().style.cursor = "";
+          return;
+        }
+
+        const c = parCode[entites[0].properties.code_insee];
+        survolee = c.code_insee;
+
+        map.setFeatureState({ source: "communes", id: survolee }, { survol: true });
+        infoBulle.setLngLat(e.lngLat)
+          .setHTML(`<b>${echapper(c.nom)}</b><br>${nombre(c.population)} hab. · ${nombre(c.part_coeur, 1)} % en cœur`)
+          .addTo(map);
+        map.getCanvas().style.cursor = "pointer";
+      });
+
+      map.on("mouseout", () => { infoBulle.remove(); eteindre(); map.getCanvas().style.cursor = ""; });
+
+      const DEPENDANTES = { communes: ["communes", "communes-contour", "communes-partielles"] };
+
+      for (const caseACocher of document.querySelectorAll("#panneau input[type=checkbox]")) {
+        caseACocher.addEventListener("change", () => {
+          const visibilite = caseACocher.checked ? "visible" : "none";
+
+          for (const id of DEPENDANTES[caseACocher.value] || [caseACocher.value]) {
+            map.setLayoutProperty(id, "visibility", visibilite);
+          }
+        });
+      }
+
+      for (const bouton of document.querySelectorAll("#panneau input[name=fond]")) {
+        bouton.addEventListener("change", () => {
+          map.setLayoutProperty("photos", "visibility", bouton.value === "photos" ? "visible" : "none");
+        });
+      }
+    });
+    
+  </script>
+</body>
+</html>
