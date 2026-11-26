@@ -92,7 +92,7 @@
     const SOURCES_COMMUNES = "Communes : IGN, ADMIN EXPRESS ; population : INSEE, population municipale";
     const DREAL = "Cœur, aire d'adhésion : DREAL Nouvelle-Aquitaine";
     const RAYON_PAR_RACINE = 0.28;
-    const URL_PMTILES = new URL("donnees/parc_pyrenees.pmtiles", location.href).href;
+    const URL_PMTILES = new URL("donnees/data.pmtiles", location.href).href;
 
     const protocole = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocole.tile);
